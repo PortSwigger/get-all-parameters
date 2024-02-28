@@ -2,8 +2,8 @@ Uuid: 815bb4ab64e240618dc673d65016e919
 ExtensionType: 2
 Name: GAP (Get All Parameters, Links, and Words)
 RepoName: get-all-parameters
-ScreenVersion: 4.6
-SerialVersion: 2
+ScreenVersion: 4.7
+SerialVersion: 3
 MinPlatformVersion: 2
 ProOnly: False
 Author: XNL-h4ck3r
