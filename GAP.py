@@ -80,7 +80,7 @@ SUS_FILEINC =  ['root','directory','path','style','folder','default-language','u
 SUS_IDOR = ['count','key','user','id','extended_data','uid2','group','team_id','data-id','no','username','email','account','doc','uuid','profile','number','user_id','edit','report','order']
 SUS_OPENREDIRECT = ['u','redirect_uri','failed','r','referer','return_url','redirect_url','prejoin_data','continue','redir','return_to','origin','redirect_to','next']
 SUS_SQLI = ['process','string','id','referer','password','pwd','field','view','sleep','column','log','token','sel','select','sort','from','search','update','pub_group_id','row','results','role','table','multi_layer_map_list','order','filter','params','user','fetch','limit','keyword','email','query','c','name','where','number','phone_number','delete','report']
-SUS_SSRF = ['start','path','domain','source','url','site','view','template','page','show','val','dest','metadata','out','feed','navigation','image_host','uri','next','continue','host','window','dir','reference','filename','html','to','return','open','port','stop','validate','resturl','callback','name','data','ip','redirect']
+SUS_SSRF = ['sector_identifier_uri', 'request_uris', 'logo_uri', 'jwks_uri', 'start','path','domain','source','url','site','view','template','page','show','val','dest','metadata','out','feed','navigation','image_host','uri','next','continue','host','window','dir','reference','filename','html','to','return','open','port','stop','validate','resturl','callback','name','data','ip','redirect']
 SUS_SSTI = ['preview','activity','id','name','content','view','template','redirect']
 SUS_XSS = ['path','admin','class','atb','redirect_uri','other','utm_source','currency','dir','title','endpoint','return_url','users','cookie','state','callback','militarybranch','e','referer','password','author','body','status','utm_campaign','value','text','search','flaw','vote','pathname','params','user','t','utm_medium','q','email','what','file','data-original','description','subject','action','u','nickname','color','language_id','auth','samlresponse','return','readyfunction','where','tags','cvo_sid1','target','format','back','term','r','id','url','view','username','sequel','type','city','src','p','label','ctx','style','html','ad_type','s','issues','query','c','shop','redirect']
 
@@ -93,7 +93,7 @@ DEFAULT_EXCLUSIONS = ".css,.jpg,.jpeg,.png,.svg,.img,.gif,.mp4,.flv,.ogv,.webm,.
 
 # A comma separated list of Content-Type exclusions used to determine what requests are checked for potential links
 # These content types will NOT be checked
-CONTENTTYPE_EXCLUSIONS = "text/css,image/jpeg,image/jpg,image/png,image/svg+xml,image/gif,image/tiff,image/webp,image/bmp,image/x-icon,image/vnd.microsoft.icon,font/ttf,font/woff,font/woff2,font/x-woff2,font/x-woff,font/otf,audio/mpeg,audio/wav,audio/webm,audio/aac,audio/ogg,audio/wav,audio/webm,video/mp4,video/mpeg,video/webm,video/ogg,video/mp2t,video/webm,video/x-msvideo,application/font-woff,application/font-woff2,application/vnd.android.package-archive,binary/octet-stream,application/octet-stream,application/pdf,application/x-font-ttf,application/x-font-otf,application/x-font-woff,application/vnd.ms-fontobject,image/avif,application/zip,application/x-zip-compressed,application/x-msdownload,application/x-apple-diskimage,application/x-rpm,application/vnd.debian.binary-package,application/x-font-truetype,font/opentype,image/pjpeg,application/x-troff-man,application/font-otf,application/x-ms-application,application/x-msdownload,video/x-ms-wmv,image/x-png,video/quicktime,image/x-ms-bmp,font/opentype,application/x-font-opentype,application/x-woff,audio/aiff"
+CONTENTTYPE_EXCLUSIONS = "text/css,image/jpeg,image/jpg,image/png,image/svg+xml,image/gif,image/tiff,image/webp,image/bmp,image/x-icon,image/vnd.microsoft.icon,font/ttf,font/woff,font/woff2,font/x-woff2,font/x-woff,font/otf,audio/mpeg,audio/wav,audio/webm,audio/aac,audio/ogg,audio/wav,audio/webm,video/mp4,video/mpeg,video/webm,video/ogg,video/mp2t,video/webm,video/x-msvideo,application/font-woff,application/font-woff2,application/vnd.android.package-archive,binary/octet-stream,application/octet-stream,application/pdf,application/x-font-ttf,application/x-font-otf,application/x-font-woff,application/vnd.ms-fontobject,image/avif,application/zip,application/x-zip-compressed,application/x-msdownload,application/x-apple-diskimage,application/x-rpm,application/vnd.debian.binary-package,application/x-font-truetype,font/opentype,image/pjpeg,application/x-troff-man,application/font-otf,application/x-ms-application,application/x-msdownload,video/x-ms-wmv,image/x-png,video/quicktime,image/x-ms-bmp,font/opentype,application/x-font-opentype,application/x-woff,audio/aiff,image/jp2,video/x-m4v"
 
 # A comma separated list of file extension exclusions used when the content-type isn't available. Files with these extensions will NOT be checked
 FILEEXT_EXCLUSIONS = ".zip,.dmg,.rpm,.deb,.gz,.tar,.jpg,.jpeg,.png,.svg,.img,.gif,.mp4,.flv,.ogv,.webm,.webp,.mov,.mp3,.m4a,.m4p,.scss,.tif,.tiff,.ttf,.otf,.woff,.woff2,.bmp,.ico,.eot,.htc,.rtf,.swf,.image,.wav,.gltf,.pict,.svgz,.eps,.midi,.mid,.pdf,.jfi,.jfif,.jfif-tbnl,.jif,.jpe,.pjpg"
@@ -1926,7 +1926,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                         fixedLinks = link
                     else:
                         fixedLinks = fixedLinks + ";" + link
-                    if re.search(r'^(https?:)\/\/.[^\.]*\.[a-z]{2,}[^\?#]*$', link, flags=re.IGNORECASE) is None:
+                    if re.search(r'^https?:\/\/([-a-z0-9@:%._\+~#=]{1,256}\.)+[a-z0-9]{2,6}$', link, flags=re.IGNORECASE) is None:
                         invalid = True
                 if not invalid:
                     self.inLinkPrefix.text = fixedLinks
@@ -2731,7 +2731,10 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                     
                     # Get the current request/response details
                     self.currentReqResp = ReqResp(http_message, self._helpers, self._stderr)
-                    self.roots.add(self.currentReqResp.getRequestUrl())
+                    root = self.currentReqResp.getRequestUrl()
+                    self.roots.add(root)
+                    prefix = urlparse(root).scheme + "://" + urlparse(root).netloc
+                    self.allScopePrefixes.add(prefix)
                     
                     if self.currentReqResp.isRequest():
                         
@@ -4454,7 +4457,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                                         allUrls.add(link + url)
                                         
                             # If specified to use targets, and the run context was Site Map tree, then add for all of those
-                            if self.cbLinkPrefixScope.isSelected() and self.context.getInvocationContext() == 4:
+                            if self.cbLinkPrefixScope.isSelected(): # and self.context.getInvocationContext() == 4:
                                 
                                 # Prefix with each root    
                                 for prefix in self.allScopePrefixes:
