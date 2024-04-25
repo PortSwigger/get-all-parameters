@@ -8,11 +8,11 @@ Get full instructions at https://github.com/xnl-h4ck3r/GAP-Burp-Extension/blob/m
 
 Good luck and good hunting! If you really love the tool (or any others), or they helped you find an awesome bounty, consider BUYING ME A COFFEE! (https://ko-fi.com/xnlh4ck3r) (I could use the caffeine!)
 """
-VERSION="4.5"
+VERSION="5.0"
 
 _debug = False
 
-from burp import IBurpExtender, IContextMenuFactory, IScopeChangeListener, ITab, IScanIssue
+from burp import IBurpExtender, IContextMenuFactory, IScopeChangeListener, ITab, IScanIssue, IHttpRequestResponse, IExtensionHelpers
 from javax.swing import (
     JFrame,
     JMenuItem,
@@ -29,16 +29,20 @@ from javax.swing import (
     BorderFactory,
     JEditorPane,
     ImageIcon,
-    JProgressBar
+    JProgressBar,
+    JDialog,
+    JPopupMenu
 )
 from java.util import ArrayList
 from urlparse import urlparse
 from java.io import PrintWriter, File
-from java.awt import Color, Font, Image, Cursor, Desktop
-from java.awt.event import KeyListener
+from java.awt import Color, Font, Image, Cursor, Desktop, BorderLayout, GridLayout, FlowLayout, Toolkit
+from java.awt.event import KeyListener, MouseListener, ItemListener, MouseEvent
 from java.net import URL, URI
 from java.lang import System
 from javax.imageio import ImageIO
+from java.awt.datatransfer import StringSelection, Clipboard
+from java.util.concurrent import Executors, TimeUnit
 
 import os
 import re
@@ -156,7 +160,16 @@ URL_GITHUB = "https://github.com/xnl-h4ck3r"
 
 # Set the colour for Burp Orange
 COLOR_BURP_ORANGE = Color(0xE36B1E)
-        
+
+# Global variable used for Scope Execution dialog 
+LAST_RUN_CONTEXT = None
+LAST_RUN_DATE = None
+ALL_ROOTS = {}
+IS_RUNNING = False
+
+# Default warning if context is Site Map tree and no results are returned
+DEFAULT_WARNING_NO_CONTENT = '\n\nMaybe scope isn\'t set?\nIt needs to be set to call GAP from the Site Map tree.\nIgnore this if there are results for other modes.'
+
 class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
     def registerExtenderCallbacks(self, callbacks):
         """
@@ -270,9 +283,9 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
         self.REGEX_LINKSEQUAL = re.compile(r"%3d|\&equals;|\&#0?61;|\u003d|u003d|x3d|\x3d", re.IGNORECASE)
         self.REGEX_LINKBRACKET = re.compile(r"\(.*\)")
         self.REGEX_LINKBRACES = re.compile(r"\{.*\}")
-        self.REGEX_LINKSEARCH1 = re.compile(r"^[^(]*\)+$")
-        self.REGEX_LINKSEARCH2 = re.compile(r"^[^{}]*\}+$")
-        self.REGEX_LINKSEARCH3 = re.compile(r"^[^\[]]*\]+$")
+        self.REGEX_LINKSEARCH1 = re.compile(r"^((?:[^\(\)]|\([^\)]*\))*)\)[^\(]*$")
+        self.REGEX_LINKSEARCH2 = re.compile(r"^((?:[^\[\]]|\[[^\]]*\])*)\][^\[]*$")
+        self.REGEX_LINKSEARCH3 = re.compile(r"^((?:[^\{\}]|\{[^\}]*\})*)\}[^\{]*$")
         self.REGEX_LINKSEARCH4 = re.compile(r"<\/")
         self.REGEX_VALIDHOST = re.compile(r"^([A-Za-z0-9_-]+\.)+[A-Za-z0-9_-]{2,}$")
         
@@ -353,7 +366,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
             self.inQueryStringVal.setToolTipText("This is a value that is used to create the concatenated query string, with each parameter given this value followed by a unique number of the parameter.\nThis query string can be used to manually append to a URL and check for reflections.")
             self.btnRestoreDefaults.setToolTipText("If for any reason you want to revert to the default configuration options, you can click this button.")
             self.btnSave.setToolTipText("Any changes made to the configuration settings of GAP can be saved for future use by clicking this button.")
-            self.progBar.setToolTipText("What request is being processed out of the total number of requests for current target.")
+            self.progBar.setToolTipText("Click to see execution scope. When running, this shows what request is being processed out of the total number of requests for current target.")
             self.progStage.setToolTipText("What Site Map target is being processed out of the total number of targets selected.")
             self.cbShowParamOrigin.setToolTipText("If this is ticked, the potential parameter will be followed by the HTTP request endpoint (in square brackets) that the parameter was found in.\nA parameter could have been found in more than one request, so this view can show duplicate links, one per origin endpoint.")
             self.cbShowLinkOrigin.setToolTipText("If this feature is ticked, the potential link will be followed by the HTTP request endpoint (in square brackets) that the link was found in.\nA link could have been found in more than one request, so this view can show duplicate links, one per origin endpoint.")
@@ -625,6 +638,8 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
         self.btnCancel.setVisible(False)
         # Create progress bar
         self.progBar = JProgressBar()
+        self.progBar.addMouseListener(ProgressBarMouseListener())
+        self.progBar.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR))
         self.progBar.setValue(0)
         self.progBar.setStringPainted(True)
         self.progBar.setVisible(False)
@@ -788,7 +803,14 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
         
         # Restore saved config settings
         self.restoreSavedConfig()
-
+        
+        # After settings have been restored, we can set the mouse liseteners
+        self.outLinkList.addMouseListener(OutputMouseListener(self.outLinkList,"Links",self._callbacks,self._helpers,self.cbShowLinkOrigin,self.cbInScopeOnly))
+        self.outParamList.addMouseListener(OutputMouseListener(self.outParamList,"Param"))
+        self.outParamSus.addMouseListener(OutputMouseListener(self.outParamSus,"Param"))
+        self.outParamQuery.addMouseListener(OutputMouseListener(self.outParamQuery,"ParamQuery"))
+        self.outWordList.addMouseListener(OutputMouseListener(self.outWordList,"Words"))
+        
         # Determine whether to "show context help"
         self.setContextHelp(self.cbToolTips.isSelected())
 
@@ -1383,7 +1405,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                 else:
                     if self.cbShowQueryString.isSelected():
                         if self.cbShowSusParams.isSelected():
-                            if self.txtParamQuerySus == "" or self.txtParamQuerySus == "NO PARAMETERS FOUND":
+                            if self.txtParamQuerySus == "" or self.txtParamQuerySus.startswith("NO PARAMETERS FOUND"):
                                 index = 0
                                 paramQuery = ""
                                 self.outParamQuery.text = "UPDATING..."
@@ -1396,7 +1418,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                             self.outParamQuery.text = self.txtParamQuerySus
                         else:
                             # Set the values if not already set
-                            if self.txtParamQuery == "" or self.txtParamQuery == "NO PARAMETERS FOUND":
+                            if self.txtParamQuery == "" or self.txtParamQuery.startswith("NO PARAMETERS FOUND"):
                                 index = 0
                                 paramQuery = ""
                                 self.outParamQuery.text = "UPDATING..."
@@ -2610,6 +2632,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
         Obtains the selected messages from the interface. Filters the sitemap for all messages containing
         URLs within the selected messages' hierarchy. If so, the message is analyzed to create a parameter list.
         """    
+        global LAST_RUN_CONTEXT, LAST_RUN_DATE, ALL_ROOTS, IS_RUNNING
         if _debug:
             print("doEverything started")
         
@@ -2629,6 +2652,8 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
         self.progBar.setMaximum(0)
         self.progBar.setString("Starting...")
         self.progBar.setVisible(True)
+        IS_RUNNING = True
+        ALL_ROOTS = {}
         
         # Ensure the full list of parameters are shown first
         self.cbShowSusParams.setSelected(False)
@@ -2640,6 +2665,8 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
             
             # If the Site Map Tree was the context for GAP, then get the Site Map instead of the selected messages
             # because in that case it only takes the root
+            LAST_RUN_CONTEXT = self.context.getInvocationContext()
+            LAST_RUN_DATE = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
             if self.context.getInvocationContext() == 4:
                 
                 for http_message in allMessages:
@@ -2656,6 +2683,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                         self.allScopePrefixes.add(prefix)
                                 
                 # Get all sitemap entries associated with the selected messages and scrape them for parameters, links and words
+                ALL_ROOTS = self.roots
                 currentRoot = 0
                 totalRoots = len(self.roots)
                 for root in self.roots:
@@ -2733,6 +2761,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                     self.currentReqResp = ReqResp(http_message, self._helpers, self._stderr)
                     root = self.currentReqResp.getRequestUrl()
                     self.roots.add(root)
+                    ALL_ROOTS = self.roots
                     prefix = urlparse(root).scheme + "://" + urlparse(root).netloc
                     self.allScopePrefixes.add(prefix)
                     
@@ -2764,6 +2793,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
             self.displayResults()
 
             # Change button to completed
+            IS_RUNNING = False
             self.setTabColor(COLOR_BURP_ORANGE)
             self.setTabTitle("GAP")
             self.checkIfCancel()
@@ -2787,6 +2817,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
             self.setTabTitle("GAP")
             self.btnCancel.setEnabled(False)
             self.btnCancel.setText("   CANCELLED    ")
+            IS_RUNNING = False
             if (
                 self.lblParamList.text.find("UPDATING") >= 0
                 or self.lblParamList.text.find("SEARCHING") >= 0
@@ -3020,7 +3051,6 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                         if urlHost != "":
                             try:
                                 # If a URL contains invalid characters then Burp raises an error for some reason when _callbacks.isInScope is done, and it can't be caught, so check it's valid
-                                #if self.REGEX_BURPURL.search(url) is not None:
                                 if self.REGEX_VALIDHOST.search(urlHost) is not None:
                                     inScope = self._callbacks.isInScope(oUrl)
                                 else: 
@@ -3104,6 +3134,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
         """
         This is called as a separate thread from displayResults to display the found parameters
         """
+        global LAST_RUN_CONTEXT
         self.txtDebugDetail.text = "displayParams"
         if _debug:
             print("displayParams started")
@@ -3126,9 +3157,13 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                 self.txtParamsSusWithURL = "\n".join(sorted(self.paramSusUrl_list))
                 
                 if self.txtParamsOnly == "":
-                    self.outParamList.text = "NO PARAMETERS FOUND"
-                    self.outParamSus.text = "NO PARAMETERS FOUND"
-                    self.outParamQuery.text = "NO PARAMETERS FOUND"
+                    # If the context is Site Map Tree then there may be no results if Scope isn't set
+                    extraInfo = ''
+                    if LAST_RUN_CONTEXT == 4:
+                        extraInfo = DEFAULT_WARNING_NO_CONTENT
+                    self.outParamList.text = "NO PARAMETERS FOUND" + extraInfo
+                    self.outParamSus.text = "NO PARAMETERS FOUND" + extraInfo
+                    self.outParamQuery.text = "NO PARAMETERS FOUND" + extraInfo
                 else:
                     if self.cbShowParamOrigin.isSelected():
                         if self.cbShowSusParams.isSelected():
@@ -3256,7 +3291,11 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
 
                 # If no links were found, write that in the text box
                 if self.outLinkList.text == "":
-                    self.outLinkList.text = "NO LINKS FOUND"
+                    # If the context is Site Map Tree then there may be no results if Scope isn't set
+                    extraInfo = ''
+                    if LAST_RUN_CONTEXT == 4:
+                        extraInfo = DEFAULT_WARNING_NO_CONTENT
+                    self.outLinkList.text = "NO LINKS FOUND" + extraInfo
                 if self.countLinkUnique > 0:
                     self.cbShowLinkOrigin.setEnabled(True)
                     self.cbInScopeOnly.setEnabled(True)
@@ -3293,6 +3332,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
         """
         This is called as a separate thread from displayResults to display the found words
         """
+        global LAST_RUN_CONTEXT
         self.txtDebugDetail.text = "displayWords"
         if _debug:
             print("displayWords started")
@@ -3315,7 +3355,11 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                     self.txtWordsWithURL = "\n".join(sorted(self.wordUrl_list))
                     
                     if self.txtWordsOnly == "":
-                        self.outWordList.text = "NO WORDS FOUND"
+                        # If the context is Site Map Tree then there may be no results if Scope isn't set
+                        extraInfo = ''
+                        if LAST_RUN_CONTEXT == 4:
+                            extraInfo = DEFAULT_WARNING_NO_CONTENT
+                        self.outWordList.text = "NO WORDS FOUND" + extraInfo
                     else:
                         if self.cbShowWordOrigin.isSelected():
                             self.outWordList.text = self.txtWordsWithURL
@@ -3373,7 +3417,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
             # Write all parameters to a file if any exist and its enabled
             self.checkIfCancel()
             if self.cbParamsEnabled.isSelected():
-                if self.outParamList.text != "NO PARAMETERS FOUND":
+                if not self.outParamList.text.startswith("NO PARAMETERS FOUND"):
                     
                     showParamOrigin = self.cbShowParamOrigin.isSelected()
                     
@@ -3464,7 +3508,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
             # Write all links to a file if any exist
             self.checkIfCancel()
             if self.cbLinksEnabled.isSelected():
-                if self.outLinkList.text != "NO LINKS FOUND":
+                if not self.outLinkList.text.startswith("NO LINKS FOUND"):
 
                     showLinkOrigin = self.cbShowLinkOrigin.isSelected()
                     inScopeOnly = self.cbInScopeOnly.isSelected()
@@ -3582,7 +3626,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                 # Write all words to a file if any exist and its enabled
                 self.checkIfCancel()
                 if self.cbWordsEnabled.isSelected():
-                    if self.outWordList.text != "NO WORDS FOUND":
+                    if not self.outWordList.text.startswith("NO WORDS FOUND"):
 
                         showWordOrigin = self.cbShowWordOrigin.isSelected()
                         
@@ -3843,6 +3887,16 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
         """
         self.txtDebugDetail.text = "includeLink: "+link
         include = True
+        
+        # If we can get the host from the link, then check if it is a valid host
+        try:
+            urlHost = urlparse(link).hostname
+            if not urlHost is None and urlHost != "":
+                # If a URL host contains invalid characters then it's not a valid link, so don't include
+                if self.REGEX_VALIDHOST.search(urlHost) is None:
+                    include = False
+        except Exception as e:
+            pass
 
         # Exclude if the finding is an endpoint link but has more than one newline character. This is a false
         # positive that can sometimes be raised by the regex
@@ -3858,22 +3912,23 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
         # - starts with /=
         # - starts with application/, image/, model/, video/, audio/ or text/ as this is a content-type that can sometimes be confused for links
         try:
-            if link.count("\n") > 1 or link.startswith("#") or link.startswith("$") or link.startswith("\\") or link.startswith("/="):
-                include = False
             if include:
-                include = not (bool(re.search(r"\s", link)))
-            if include:
-                include = not (bool(re.search(r"\n", link)))
-            if include:
-                include = bool(re.search(r"[0-9a-zA-Z]", link))
-            if include:
-                include = not (bool(re.search(r"\\(s|S)", link)))
-            if include:
-                include = not (bool(re.match(r"^(application\/|image\/|model\/|video\/|audio\/|text\/)", link, re.IGNORECASE)))
-            for char in link:
-                if ord(char) < 32:
+                if link.count("\n") > 1 or link.startswith("#") or link.startswith("$") or link.startswith("\\") or link.startswith("/="):
                     include = False
-                    break
+                if include:
+                    include = not (bool(re.search(r"\s", link)))
+                if include:
+                    include = not (bool(re.search(r"\n", link)))
+                if include:
+                    include = bool(re.search(r"[0-9a-zA-Z]", link))
+                if include:
+                    include = not (bool(re.search(r"\\(s|S)", link)))
+                if include:
+                    include = not (bool(re.match(r"^(application\/|image\/|model\/|video\/|audio\/|text\/)", link, re.IGNORECASE)))
+                for char in link:
+                    if ord(char) < 32:
+                        include = False
+                        break
         except Exception as e:
             self._stderr.println("includeLink 2")
             self._stderr.println(e)
@@ -3969,6 +4024,23 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
             
         return include
 
+    def stripLinkFromUnbalancedBrackets(self, regex, link):
+        """
+        Search a link for an unmatched bracket (using the regex passed)
+        """
+        try:
+            pattern = re.compile(regex)
+            # Search for the pattern in the link
+            match = re.search(pattern, link)
+            # If a match is found, return the matched substring, else return the original link
+            if match:
+                return match.group(1)
+            else:
+                return link
+        except Exception as e:
+            self._stderr.println("ERROR stripLinkFromUnbalancedBrackets 1")
+            self._stderr.println(e)
+    
     def getResponseLinks(self):
         """
         Get a list of links found
@@ -4017,63 +4089,63 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                             print("  getResponseLinks link: "+link)
                         
                         link = link.strip("\"'\n\r( ")
-                        link = link.replace("\\n", "")
-                        link = link.replace("\\r", "")
+                        link = link.split("\\n")[0]
+                        link = link.split("\\r")[0]
                         link = link.replace("\\.", ".")
 
                         try:
-                            first = link[:1]
-                            last = link[-1]
-                            firstTwo = link[:2]
-                            lastTwo = link[-2]
+                            if link != '':
+                                first = link[:1]
+                                last = link[-1]
+                                firstTwo = link[:2]
+                                lastTwo = link[-2]
 
-                            if (
-                                first == '"'
-                                or first == "'"
-                                or first == "\n"
-                                or first == "\r"
-                                or firstTwo == "\\n"
-                                or firstTwo == "\\r"
-                            ) and (
-                                last == '"'
-                                or last == "'"
-                                or last == "\n"
-                                or last == "\r"
-                                or lastTwo == "\\n"
-                                or lastTwo == "\\r"
-                            ):
-                                if firstTwo == "\\n" or firstTwo == "\\r":
-                                    start = 2
-                                else:
-                                    start = 1
-                                if lastTwo == "\\n" or lastTwo == "\\r":
-                                    end = 2
-                                else:
-                                    end = 1
-                                link = link[start:-end]
+                                if (
+                                    first == '"'
+                                    or first == "'"
+                                    or first == "\n"
+                                    or first == "\r"
+                                    or firstTwo == "\\n"
+                                    or firstTwo == "\\r"
+                                ) and (
+                                    last == '"'
+                                    or last == "'"
+                                    or last == "\n"
+                                    or last == "\r"
+                                    or lastTwo == "\\n"
+                                    or lastTwo == "\\r"
+                                ):
+                                    if firstTwo == "\\n" or firstTwo == "\\r":
+                                        start = 2
+                                    else:
+                                        start = 1
+                                    if lastTwo == "\\n" or lastTwo == "\\r":
+                                        end = 2
+                                    else:
+                                        end = 1
+                                    link = link[start:-end]
 
-                            # If there are any trailing back slashes, comma, =, :, ; or >; remove them all
-                            link = link.rstrip("\\")
-                            link = link.rstrip(">;")
-                            link = link.rstrip(";")
-                            link = link.rstrip(",")
-                            link = link.rstrip("=")
-                            link = link.rstrip(":")
-                            
-                            # If there are any backticks in the URL, remove everything from the backtick onwards
-                            link = link.split("`")[0]
-                            
-                            # If there are any closing brackets of any kind without an opening bracket, remove everything from the closing bracket onwards
-                            if self.REGEX_LINKSEARCH1.search(link):
-                                link = link.split(")", 1)[0]
-                            if self.REGEX_LINKSEARCH2.search(link):
-                                link = link.split("}", 1)[0]
-                            if self.REGEX_LINKSEARCH3.search(link):
-                                link = link.split("]", 1)[0]    
+                                # Remove trailijng characters not wanted
+                                link = link.rstrip("\\")
+                                link = link.rstrip(">;")
+                                link = link.rstrip(";")
+                                link = link.rstrip(",")
+                                link = link.rstrip("=")
+                                link = link.rstrip(":")
+                                link = link.rstrip(".")
+                                link = link.rstrip("|")
                                 
-                            # If there is a </ in the link then strip from that forward
-                            if self.REGEX_LINKSEARCH4.search(link):
-                                link = link.split("</", 1)[0]                           
+                                # If there are any backticks in the URL, remove everything from the backtick onwards
+                                link = link.split("`")[0]
+                                
+                                # If there are any unbalanced brackets in the link, then strip from the unbalanced bracket
+                                link = self.stripLinkFromUnbalancedBrackets(self.REGEX_LINKSEARCH1, link)
+                                link = self.stripLinkFromUnbalancedBrackets(self.REGEX_LINKSEARCH2, link)
+                                link = self.stripLinkFromUnbalancedBrackets(self.REGEX_LINKSEARCH3, link)
+                                
+                                # If there is a </ in the link then strip from that forward
+                                if self.REGEX_LINKSEARCH4.search(link):
+                                    link = link.split("</", 1)[0]                           
                         
                         except Exception as e:
                             self._stderr.println("getResponseLinks 2")
@@ -4083,62 +4155,62 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                             except:
                                 pass
 
-                        # If the link starts with a . and the  2nd character is not a . or / then remove the first .
-                        if link[0] == "." and link[1] != "." and link[1] != "/":
-                            link = link[1:]
+                        if link != '':
+                            # If the link starts with a . and the  2nd character is not a . or / then remove the first .
+                            if link[0] == "." and link[1] != "." and link[1] != "/":
+                                link = link[1:]
 
-                        # Determine if Link should be included
-                        include = self.includeLink(link)
+                            # If the link found is for a .js.map file then put the full .map URL in the list
+                            if link.find("//# sourceMappingURL") >= 0:
 
-                        # If the link found is for a .js.map file then put the full .map URL in the list
-                        if link.find("//# sourceMappingURL") >= 0:
-                            include = True
+                                # Get .map link after the =
+                                firstpos = link.rfind("=")
+                                lastpos = link.find("\n")
+                                if lastpos <= 0:
+                                    lastpos = len(link)
+                                mapFile = link[firstpos + 1 : lastpos]
 
-                            # Get .map link after the =
-                            firstpos = link.rfind("=")
-                            lastpos = link.find("\n")
-                            if lastpos <= 0:
-                                lastpos = len(link)
-                            mapFile = link[firstpos + 1 : lastpos]
+                                # Get the response url up to last /
+                                lastpos = responseUrl.rfind("/")
+                                mapPath = responseUrl[0 : lastpos + 1]
 
-                            # Get the response url up to last /
-                            lastpos = responseUrl.rfind("/")
-                            mapPath = responseUrl[0 : lastpos + 1]
+                                # Add them to get link of js.map and add to list
+                                link = mapPath + mapFile
+                                link = link.replace("\n", "")
 
-                            # Add them to get link of js.map and add to list
-                            link = mapPath + mapFile
-                            link = link.replace("\n", "")
+                            # Determine if Link should be included
+                            include = self.includeLink(link)
+                            
+                            # If a link starts with // then add http:
+                            if link.startswith("//"):
+                                link = "http:" + link
+                            
+                            # Only add the finding if it should be included
+                            if include:
+                                self.addLink(link,responseUrl)
 
-                        # If a link starts with // then add http:
-                        if link.startswith("//"):
-                            link = "http:" + link
-
-                        # Only add the finding if it should be included
-                        if include:
-                            self.addLink(link,responseUrl)
-
-                            # Get parameters from links if requested, Parameters mode is enabled AND the link is in scope
-                            if (
-                                self.cbParamFromLinks.isSelected()
-                                and self.cbParamsEnabled.isSelected()
-                                and link.find("?") > 0
-                                and self.isLinkInScope(link)
-                            ):
-                                # Get parameters from the link
-                                try:
-                                    link = link.replace("%5c","").replace("\\","")
-                                    link = self.REGEX_LINKSAND.sub("&", link)
-                                    link = self.REGEX_LINKSEQUAL.sub("=", link)
-                                    param_keys = self.REGEX_PARAMKEYS.finditer(link)
-                                    for param in param_keys:
-                                        if _debug:
-                                            print("    getResponseLinks param: "+str(param.group()))
-                                        self.checkIfCancel()
-                                        if param is not None and param.group() != "":
-                                            self.addParameter(param.group().strip(), "Firm", "RESPLINKS")
-                                except Exception as e:
-                                    self._stderr.println("getResponseLinks 3")
-                                    self._stderr.println(e)
+                                # Get parameters from links if requested, Parameters mode is enabled AND the link is in scope
+                                if (
+                                    self.cbParamFromLinks.isSelected()
+                                    and self.cbParamsEnabled.isSelected()
+                                    and link.find("?") > 0
+                                    and self.isLinkInScope(link)
+                                ):
+                                    # Get parameters from the link
+                                    try:
+                                        link = link.replace("%5c","").replace("\\","")
+                                        link = self.REGEX_LINKSAND.sub("&", link)
+                                        link = self.REGEX_LINKSEQUAL.sub("=", link)
+                                        param_keys = self.REGEX_PARAMKEYS.finditer(link)
+                                        for param in param_keys:
+                                            if _debug:
+                                                print("    getResponseLinks param: "+str(param.group()))
+                                            self.checkIfCancel()
+                                            if param is not None and param.group() != "":
+                                                self.addParameter(param.group().strip(), "Firm", "RESPLINKS")
+                                    except Exception as e:
+                                        self._stderr.println("getResponseLinks 3")
+                                        self._stderr.println(e)
             except Exception as e:
                 if not self.flagCANCEL:
                     self._stderr.println("getResponseLinks 1")
@@ -4233,7 +4305,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                     
                     # Process all words found
                     for word in potentialWords:
-                        
+                        self.checkIfCancel()
                         # If the word has already been processes, skip to the next
                         if word in wordsProcessed:
                             continue
@@ -4952,6 +5024,343 @@ class CustomKeyListener(KeyListener):
     def keyReleased(self, e=None):
         return
 
+class OutputMouseListener(MouseListener):
+    global IS_RUNNING
+    scheduled_tasks = []
+
+    def __init__(self, text_area, identifier, callbacks=None, helpers=None, linksShowOrigin=None, linksInScope=None):
+        self.text_area = text_area
+        self.identifier = identifier
+        self.callbacks = callbacks
+        self.helpers = helpers
+        self.linksShowOrigin = linksShowOrigin
+        self.linksInScope = linksInScope
+        self.popup_menu = self.create_popup_menu()
+        self.executor = Executors.newScheduledThreadPool(2) 
+        self.scheduled_tasks = []
+                
+    def create_popup_menu(self):
+        # Create a popup menu
+        popup_menu = JPopupMenu()
+        
+        # Create a "Copy" menu item
+        if self.identifier == "Param":
+            menu = "Copy paramaters"
+        elif self.identifier == "ParamQuery":
+            menu = "Copy query string"
+        elif self.identifier == "Links":
+            menu = "Copy links"
+        elif self.identifier == "Words":
+            menu = "Copy words"
+        else:
+            menu = 'Copy'
+        copy_item = JMenuItem(menu)
+        copy_item.addActionListener(self.copy_to_clipboard)
+        popup_menu.add(copy_item)
+        
+        # Show other menu items for links
+        if self.identifier == "Links":
+            
+            # If the origin isn't shown, and the In Scope option is selected, allow an item to request all URLs
+            if not self.linksShowOrigin.isSelected() and self.linksInScope.isSelected():
+                send_item = JMenuItem("Request all prefixed URLs and send to Site Map")
+                send_item.addActionListener(self.send_requests)
+                popup_menu.add(send_item)
+            
+            # Remove any complete tasks beofre checking whether to show Cancel button
+            # Iterate over a copy of the list to avoid modification during iteration
+            for task in self.scheduled_tasks[:]: 
+                if task.isDone():
+                    self.scheduled_tasks.remove(task)
+                    
+            # If any requests have been scheduled to send, then have an option to cancel them
+            if len(self.scheduled_tasks) > 0:
+                cancel_item = JMenuItem("Cancel all requests being made")
+                cancel_item.addActionListener(self.cancel_requests)
+                popup_menu.add(cancel_item)
+            
+        return popup_menu
+    
+    def update_popup_menu(self, event):
+        # Clear existing menu items
+        self.popup_menu.removeAll()
+        
+        # Re-create the menu
+        self.popup_menu = self.create_popup_menu()
+        
+    def mouseClicked(self, event):
+        # If right mouse button pressed, and it's not still running, and it hasn't been Cancelled, or nothing found
+        if event.getButton() == MouseEvent.BUTTON3 and not IS_RUNNING and self.text_area.getText() != '' and self.text_area.getText() != 'CANCELLED' and not self.text_area.getText().startswith('NO PARAMETERS FOUND') and not self.text_area.getText().startswith('NO WORDS FOUND') and not self.text_area.getText().startswith('NO LINKS FOUND'):
+            self.update_popup_menu(self)
+            # Show the popup menu at the mouse location
+            self.popup_menu.show(event.getComponent(), event.getX(), event.getY())
+
+    def cancel_requests(self, event):
+        num_requests_scheduled = 0
+        for task in self.scheduled_tasks:
+            if not task.isCancelled() and not task.isDone():
+                num_requests_scheduled += 1
+                task.cancel(True)
+        print("Cancelled " + str(num_requests_scheduled) + " scheduled requests.")
+        self.scheduled_tasks = []
+            
+    def send_requests(self, event):
+        # Define a function to make the HTTP request
+        def make_request(url_string):
+            try:
+                # Create a URL object
+                url = URL(url_string)
+
+                # Get the host and protocol
+                host = url.getHost()
+                protocol = url.getProtocol()
+
+                # Don't process hosts with an * in
+                if "*" not in host:
+                    # Determine the port, use default port if not specified in URL
+                    port = url.getPort()
+                    if port == -1:
+                        if protocol == "http":
+                            port = 80
+                        elif protocol == "https":
+                            port = 443
+
+                    # Create an IHttpService object
+                    http_service = self.helpers.buildHttpService(host, port, protocol)
+
+                    # Build HTTP request
+                    request = self.helpers.buildHttpRequest(url)
+                    
+                    # Send the request and add to site map
+                    response = self.callbacks.makeHttpRequest(http_service, request)
+                    response.setComment("GAP Request")
+                    self.callbacks.addToSiteMap(response)
+                    
+            except Exception as e:
+                print("OutputMouseListener.send_requests.make_request: "+str(e))
+            
+        # Split text area content into lines
+        lines = self.text_area.getText().split("\n")
+        
+        # Iterate through lines and make request for lines starting with 'http'
+        executor = Executors.newScheduledThreadPool(2)
+        delay = 0
+        links = set()
+        for line in lines:
+            line = line.strip()
+            if line.startswith("http"):
+                links.add(line)
+        num_requests_scheduled = len(links)
+        print("Starting task with " + str(num_requests_scheduled) + " requests scheduled.")
+        for link in links:
+            # Schedule the task and keep track of the ScheduledFuture object
+            task = self.executor.schedule(lambda url=link: make_request(url), delay*10, TimeUnit.MILLISECONDS)
+            self.scheduled_tasks.append(task)
+            
+            delay += 1 # Increase the delay for the next URL
+        
+    def copy_to_clipboard(self, event):
+        # Get the text from the text area. If it is sus parameters, then remove the vuln type
+        firstLine = self.text_area.getText().split('\n')[0]
+        if self.identifier == "Param" and re.match(r'.*\s{2}\[[A-Z, ]*\]', firstLine.strip()):
+            text = '\n'.join(line.split('  [')[0] for line in self.text_area.getText().split('\n'))
+        else:
+            text = self.text_area.getText()
+        
+        # Copy the text to the clipboard
+        clipboard = Toolkit.getDefaultToolkit().getSystemClipboard()
+        clipboard.setContents(StringSelection(text), None)
+
+        # Dispose the popup menu after "Copy" is selected
+        event.getSource().getParent().setVisible(False)
+        
+    def mousePressed(self, event):
+        pass
+
+    def mouseReleased(self, event):
+        pass
+
+    def mouseEntered(self, event):
+        pass
+
+    def mouseExited(self, event):
+        pass
+
+    def mouseDragged(self, event):
+        pass
+
+    def mouseMoved(self, event):
+        pass
+    
+class CheckBoxListener(ItemListener):
+    def __init__(self, lbl_requests, txt_requests, all_roots, context, is_running):
+        self.lbl_requests = lbl_requests
+        self.txt_requests = txt_requests
+        self.all_roots = all_roots
+        self.context = context
+        self.is_running = is_running
+
+    def itemStateChanged(self, event):
+        # Get the state of the checkbox (selected or deselected)
+        checkbox = event.getSource()
+        checked = checkbox.isSelected()
+
+        # Update txtRequests based on checkbox state
+        if checked:
+            # Show unique hostnames from ALL_ROOTS
+            unique_hosts = set(urlparse(url).hostname for url in self.all_roots)
+            self.txt_requests.setText('\n'.join(sorted(unique_hosts)))
+            if not self.is_running or self.context == 'Target Site Map Tree':
+                self.lbl_requests.setText("Hosts ({}): ".format(len(unique_hosts)))
+            else:
+                self.lbl_requests.setText("Hosts ({}) so far: ".format(len(unique_hosts)))
+        else:
+            # Show all URLs from ALL_ROOTS
+            self.txt_requests.setText('\n'.join(str(url) for url in self.all_roots))
+            if not self.is_running or self.context == 'Target Site Map Tree':
+                self.lbl_requests.setText("Unique targets ({}): ".format(len(self.all_roots)))
+            else:
+                self.lbl_requests.setText("Unique targets ({}) so far: ".format(len(self.all_roots)))
+
+        # Reposition at the start
+        self.txt_requests.setCaretPosition(0)
+        
+class ProgressBarMouseListener(MouseListener):
+    global LAST_RUN_CONTEXT, LAST_RUN_DATE, ALL_ROOTS, IS_RUNNING
+    
+    def mouseClicked(self, event):
+        
+        # Create a parent JFrame to be passed to the JDialog
+        parent_frame = None  # You need to set this to your parent JFrame
+
+        # Create a JDialog
+        dialog = JDialog(parent_frame, "GAP Exection Scope - " + LAST_RUN_DATE, True)  # 'True' makes the dialog modal
+        dialog.setSize(800, 600)
+        dialog.setLocationRelativeTo(None)
+        dialog.setLayout(BorderLayout())
+
+        # Create panels for different sections
+        panel_top = JPanel()
+        panel_middle = JPanel()
+        panel_bottom = JPanel()
+
+        # Create components for each section
+        if LAST_RUN_CONTEXT == 0:
+            context = 'Message Editor Request'
+        elif LAST_RUN_CONTEXT == 1:
+            context = 'Message Editor Response'
+        elif LAST_RUN_CONTEXT == 2:
+            context = 'Message Viewer Request'
+        elif LAST_RUN_CONTEXT == 3:
+            context = 'Message Viewer Response'
+        elif LAST_RUN_CONTEXT == 4:
+            context = 'Target Site Map Tree'
+        elif LAST_RUN_CONTEXT == 5:
+            context = 'Target Site Map Table'
+        elif LAST_RUN_CONTEXT == 6:
+            context = 'Proxy History'
+        elif LAST_RUN_CONTEXT == 7:
+            context = 'Scanner Results'
+        elif LAST_RUN_CONTEXT == 8:
+            context = 'Intruder Payload Positions'
+        elif LAST_RUN_CONTEXT == 9:
+            context = 'Intruder Attacker Results'
+        elif LAST_RUN_CONTEXT == 10:
+            context = 'Search Results'
+        else:
+            context = '<unknown>'
+
+        header = "Last executed from context: " + context
+        lblContext = JLabel(header)
+        lblRequests = JLabel() 
+        txtRequests = JTextArea(10, 30)
+        txtRequests.setEditable(False)
+        txtRequests.setCaretColor(txtRequests.getBackground())
+        scrRequests = JScrollPane(txtRequests)
+        
+        # Convert set elements to string and set it as the text of JTextArea
+        txtRequests.setText('\n'.join(str(url) for url in ALL_ROOTS))
+
+        # Create show host only checkbox
+        chkShowHost = JCheckBox("Show host only")
+        chkShowHost.setFocusable(False)
+        chkShowHost.setHorizontalAlignment(4)
+        chkShowHost.setSelected(True)
+        if LAST_RUN_CONTEXT == 4:
+            chkShowHost.setVisible(False)
+        else:
+            chkShowHost.setVisible(True)
+        
+        # Add an item listener to chkShowHost
+        chkShowHost.addItemListener(CheckBoxListener(lblRequests, txtRequests, ALL_ROOTS, context, IS_RUNNING))
+        
+        # Update txtRequests based on initial state of chkShowHost
+        unique_hosts = set(urlparse(url).hostname for url in ALL_ROOTS)
+        txtRequests.setText('\n'.join(sorted(unique_hosts)))
+        txtRequests.setCaretPosition(0)
+        if not IS_RUNNING or LAST_RUN_CONTEXT == 4: # Site Map
+            lblRequests.setText("Hosts ({}): ".format(len(unique_hosts)))
+        else:
+            lblRequests.setText("Hosts ({}) so far: ".format(len(unique_hosts)))
+        
+        # Create close button
+        btnClose = JButton("Close")
+        btnClose.addActionListener(lambda event: dialog.dispose())  # Dispose of the dialog when button is clicked
+        btnClose.setBackground(COLOR_BURP_ORANGE)
+        btnClose.setForeground(Color.WHITE)
+        btnClose.setFont(btnClose.getFont().deriveFont(Font.BOLD))
+        
+        # Set layout managers for panels
+        panel_top.setLayout(GridLayout(2, 1))
+        panel_middle.setLayout(GridLayout(1, 1)) 
+        panel_bottom.setLayout(FlowLayout(FlowLayout.RIGHT))
+        
+        # Add empty borders to panels
+        panel_top.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10))
+        panel_middle.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 10))
+        panel_bottom.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10))
+        
+        # Add components to panels
+        panel_top.add(lblContext)
+        panel_top.add(chkShowHost)
+        panel_top.add(lblRequests)
+        panel_middle.add(scrRequests)
+        panel_bottom.add(btnClose)
+
+        # Add panels to dialog
+        dialog.add(panel_top, BorderLayout.NORTH)
+        dialog.add(panel_middle, BorderLayout.CENTER)
+        dialog.add(panel_bottom, BorderLayout.SOUTH)
+        
+        # Try to set the icon of the displayed pane
+        try:
+            imageUrl = URL(HELP_ICON)
+            img = ImageIcon(imageUrl)
+            dialog.setIconImage(img.getImage())
+        except Exception as e:
+            pass
+        
+        # Set the dialog visibility
+        dialog.setVisible(True)
+
+    def mousePressed(self, event):
+        pass
+
+    def mouseReleased(self, event):
+        pass
+
+    def mouseEntered(self, event):
+        pass
+
+    def mouseExited(self, event):
+        pass
+
+    def mouseDragged(self, event):
+        pass
+
+    def mouseMoved(self, event):
+        pass
+    
 class CustomIssue(IScanIssue):
     """
     A Class used to create a custom issue in Burp 

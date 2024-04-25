@@ -1,5 +1,33 @@
 ## Changelog
 
+- v5.0
+
+  - New
+
+    - You can right click on the Potential Links found list, and if `Show origin endpoint` is unchecked and `In scope only` is checked, you can select `Request all prefixed URLs and send to Site Map`. This will request all URLs shown in the current pane (so can be filtered with `Link filter` too) and make a GET request for each URL. The URLs will be requested in 2 separate threads, with 10 milliseconds between each request, and they will be added to the Site Map.
+    - When requests are being made, you can right click on the Potential Links found list and select the `Cancel all requests being made` menu item to stop all requests previously scheduled.
+    - If a link found ends with a `.` or `|`, then they will be removed.
+    - If a link found has literal `\n` or `\r` in it, then it will be stripped from the first occurrence.
+    - When checking if a link is valid, check if it has a host and it is a valid host. This will remove false positives like `alert(e.which)` for example.
+
+  - Changed
+
+    - Change code that looked for a closed bracket without an open one, for better code that checks for unbalanced brackets, and strips from the unbalanced closing bracket.
+    - Change `getResponseLinks` to prevent runtime errors happening when the link gets set to blank.
+    - Remove a print statement accidentally left in when copying to the clipboard.
+
+- v4.9
+
+  - New
+
+    - You can click the progress bar to see a modal dialog box showing the datetime of the last run, with the context GAP was run from (e.g. `Target Site Map Tree`, `Proxy History`, etc.) and a list of Hosts. For all contexts other than `Target Site Map Tree`, there will be a `Show hosts only` check box (defaults to checked). If unchecked, then a list of unique target URLs are displayed instead.
+    - You can now right click on the params, words and links pane and click the `Copy` link to copy the contents of that pane to the clipboard. For "sus" parameters view, the parameters will be copied without the vulnerability types in square brackets after them.
+    - If GAP is called from the Site Map tree context, then Scope has to be set to work. This can often make people think GAP isn't working correctly. So, if run from this context and no content is found, and additional message is given in the output pane(s) saying `Maybe scope isn't set? It needs to be set to call GAP from the Site Map tree. Ignore this if there are results for other modes.`
+
+  - Changed
+
+    - Change the progress bar tooltip text to `Click to see execution scope. When running, this shows what request is being processed out of the total number of requests for current target.`
+
 - v4.8
 
   - New
