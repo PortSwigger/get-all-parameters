@@ -1,5 +1,31 @@
 ## Changelog
 
+- v5.3
+
+  - Changed
+
+    - Change `REGEX_JSNESTED` (used by the `Javascript variables and constants` option) to also get params from nested objects that start with `JSON.stringify(`.
+
+- v5.2
+
+  - Changed
+
+    - Fix bug where "sus" parameters wouldn't be shown at all in the `Potential param` pane if the option to `Report "sus" params` issues was not selected.
+    - Change `REGEX_JSNESTED` (used by the `Javascript variables and constants` option) to also get params from nested objects that start with `dataLayer.push(`.
+    - Improve the description for `Javascript variables and constants` in the `GAP Help.md`.
+
+- v5.1
+
+  - New
+
+    - When the `RESPONSE PARAMETERS` option of `Javascript variables and constants` is selected, GAP will now extract parameter names from nested objects too.
+    - Add `Inc. Tentative?` option next to `Report "sus"params?` option. Findings marked `Tentative` will only be raised if this option is checked. If disabled it will speed up processing.
+
+  - Changed
+
+    - Move the check for Sus param checkbox being checked to the start of `checkSusParams` instead of half way through, to help speed things up.
+    - Change regex `REGEX_PARAMSPOSSIBLE` and `REGEX_PARAMSSUB` to check for HTML entities with the `&` as optional, as sometimes they appear without. This ensures they are replaced more effectively.
+
 - v5.0
 
   - New

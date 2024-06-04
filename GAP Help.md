@@ -38,6 +38,7 @@ When the GAP Mode of Parameters is selected then GAP will try to find as many po
 <ul>
 <li><b>Include URL path words?</b> - The words in the response URL path are included as potential parameters if the URL is in scope.</li>
 <li><b>Report "sus" parameters?</b> - If a "sus" parameter is identified, a Burp custom Issue will be raised (unavailable in Burp Community Edition). There will be no markers in the Request/Response of the Issue showing where the named parameter can be found because including this functionality seriously increases the time GAP can take to run, so this is not a feature at the moment. For Burp Community Edition, the details of the parameter will be written to the extension output.</b></li>
+<li><b>Inc. Tentative?</b> - If a "sus" parameter is identified, the <b>Report "sus" parameters</b> option is checked, and the confidence is <b>Tentative</b>, this option determines whether it is raised or not.</li>
 </ul>
 
 <h2>Request Parameters</h2>
@@ -66,7 +67,7 @@ These are potential parameters that can be found in the HTTP responses. These ar
 <li><b>JSON params</b> - if the response has a MIME type of JSON then the Key names will be retrieved</li>
 <li><b>Value of tag attributes in XML structure</b> - if the response has a MIME type of XML then the XML attributes are retrieved</li>
 <li><b>Name and Id attributes of HTML input fields</b> - if the response has a MIME type of HTML then the value of the NAME and ID attributes of any INPUT tags are retrieved</li>
-<li><b>Javascript variables and constants</b> - javascript variables set with <code>var</code>, <code>let</code> or <code>const</code> are retrieved. <b>NOTE: Improvements are needed to retrieve more variables as there are many ways that these can be declared and difficult to retrieve all from regex.</b></li>
+<li><b>Javascript variables and constants</b> - javascript variables set with <code>var</code>, <code>let</code> or <code>const</code> are retrieved. Also, if there is a variable set with one of those keywords that is set to a nested object, the keys for that object are also returned as parameters. In addition to this, any key value is nested objects for <code>dataLayer.push</code> are also returned. <b>NOTE: Improvements are needed to retrieve more variables as there are many ways that these can be declared and difficult to retrieve all from regex.</b></li>
 <li><b>Params from links found</b> - THIS OPTION IS ONLY ENABLED IF LINKS MODE IS ALSO USED. Any URL query string parameters in potential Links found will be retrieved, only if they are clearly in scope, or there is just a path and no way of determining if it is in scope.</li>
 </ul>
 
