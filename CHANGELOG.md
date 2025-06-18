@@ -1,5 +1,32 @@
 ## Changelog
 
+- v5.8
+
+  - New
+
+    - Get links when jQuery-like methods such as `.get()`, `.post()`, etc., are being used. There are some false positives by just checking for `.get(` instead of `$.get(` for example, but the trade off is worth it for now.
+    - Get links from `fetch()` just in case there are any that the main regex does not get.
+
+  - Changed
+
+    - Potential parameter names should only be displayed if they ONLY contain the following characters `A-Z a-z 0-9 - _ . ~ [ ]`. These are the only characters that should appear in parameter names.
+
+- v5.7
+
+  - New
+
+    - Also get potential links from S3 bucket file listings where file names can be in `<Key></Key>` tags.
+
+  - Changed
+
+    - BUG FIX: Prefix any extra links found with `tldextract` with a `//` so they are treated later as full URLs, not file names, and therefore checked correctly for scope.
+
+- v5.6
+
+  - Changed
+
+    - If the `cbParamInputField` checkbox is selected then it will get names from HTML `input` fields AND `textarea` fields. If the content type contains `HTML` OR `JAVSCRIPT` then the response will be searched (because the HTML may be getting built in the javascript code).
+
 - v5.5
 
   - New

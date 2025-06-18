@@ -8,7 +8,7 @@ Get full instructions at https://github.com/xnl-h4ck3r/GAP-Burp-Extension/blob/m
 
 Good luck and good hunting! If you really love the tool (or any others), or they helped you find an awesome bounty, consider BUYING ME A COFFEE! (https://ko-fi.com/xnlh4ck3r) (I could use the caffeine!)
 """
-VERSION="5.5"
+VERSION="5.8"
 
 _debug = False
 
@@ -241,10 +241,16 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                     )
 
         # Compile the link regex
-        self.REGEX_LINKS = re.compile(r"(?:^|\"|'|\\n|\\r|\n|\r|\s)(((?:[a-zA-Z]{1,10}:\/\/|\/\/)([^\"'\/\s]{1,255}\.[a-zA-Z]{2,24}|localhost)[^\"'\n\s]{0,255})|((?:\/|\.\.\/|\.\/)[^\"'><,;| *()(%%$^\/\\\[\]][^\"'><,;|()\s]{1,255})|([a-zA-Z0-9_\-\/]{1,}\/[a-zA-Z0-9_\-\/\.]{1,255}\.(?:[a-zA-Z]{1,4}" + self.LINK_REGEX_NONSTANDARD_FILES + ")(?:[\?|\/][^\"|']{0,}|))|([a-zA-Z0-9_\-\.]{1,255}\.(?:" + LINK_REGEX_FILES + ")(?:\?[^\"|^']{0,255}|)))(?:\"|'|\\n|\\r|\n|\r|\s|$)|(?<=^Disallow:\s)[^\$\n]*|(?<=^Allow:\s)[^\$\n]*|(?<= Domain\=)[^\";']*|(?<=\<)https?:\/\/[^>\n]*|(\"|\')([A-Za-z0-9_-]+\/)+[A-Za-z0-9_-]+(\.[A-Za-z0-9]{2,}|\/?(\?|\#)[A-Za-z0-9_\-&=\[\]]*)(\"|\')", re.IGNORECASE)
+        self.REGEX_LINKS = re.compile(r"(?:^|\"|'|\\n|\\r|\n|\r|\s)(((?:[a-zA-Z]{1,10}:\/\/|\/\/)([^\"'\/\s]{1,255}\.[a-zA-Z]{2,24}|localhost)[^\"'\n\s]{0,255})|((?:\/|\.\.\/|\.\/)[^\"'><,;| *()(%%$^\/\\\[\]][^\"'><,;|()\s]{1,255})|([a-zA-Z0-9_\-\/]{1,}\/[a-zA-Z0-9_\-\/\.]{1,255}\.(?:[a-zA-Z]{1,4}" + self.LINK_REGEX_NONSTANDARD_FILES + ")(?:[\?|\/][^\"|']{0,}|))|([a-zA-Z0-9_\-\.]{1,255}\.(?:" + LINK_REGEX_FILES + ")(?:\?[^\"|^']{0,255}|)))(?:\"|'|\\n|\\r|\n|\r|\s|$)|(?<=^Disallow:\s)[^\$\n]*|(?<=^Allow:\s)[^\$\n]*|(?<= Domain\=)[^\";']*|(?<=\<)https?:\/\/[^>\n]*|(\"|\')([A-Za-z0-9_-]+\/)+[A-Za-z0-9_-]+(\.[A-Za-z0-9]{2,}|\/?(\?|\#)[A-Za-z0-9_\-&=\[\]]*)(\"|\')|(?<=\<Key\>)[^\<]+\<\/Key\>", re.IGNORECASE)
         
         # Compile the extra links regex
         self.REGEX_LINKS_EXTRA = re.compile(r"(?:[a-zA-Z0-9_-]+\.){0,5}[a-zA-Z0-9_-]+\.[a-zA-Z]{2,24}(?:(\/|\?)[^\s\"'<>()\[\]{}]*)?", re.IGNORECASE)
+        
+        # Compile the regex for getting potential endpoints built in JS
+        self.REGEX_LINKS_JSBUILT = re.compile(r'\.(?:get|post|put|delete|patch)\(\s*["\'`]([^)]*?)\)', re.IGNORECASE)
+                                                                                                                      
+        # Compile the regex for getting fetch() links
+        self.REGEX_LINKS_FETCH = re.compile(r'''fetch\s*\(\s*["'`]((?:\/|https?:\/\/)[^"'`)]*)["'`]''', re.IGNORECASE)
         
         # Regex for checking Burp url when checking if in scope
         self.REGEX_BURPURL = re.compile(r"^(https?:)?\/\/([-a-zA-Z0-9_]+\.)?[-a-zA-Z0-9_]+\.[-a-zA-Z0-9_\.\?\#\&\=]+$", re.IGNORECASE)
@@ -256,7 +262,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
         self.REGEX_XMLATTR = re.compile(r"<([a-zA-Z0-9$_\.-]*?)>")
         
         # Regex for HTML input fields
-        self.REGEX_HTMLINP = re.compile(r"<input(.*?)>", re.IGNORECASE)
+        self.REGEX_HTMLINP = re.compile(r"<(input|textarea)(.*?)>", re.IGNORECASE)
         self.REGEX_HTMLINP_NAME = re.compile(r"(?<=\sname)[\s]*\=[\s]*(\"|')(.*?)(?=(\"|\'))", re.IGNORECASE)    
         self.REGEX_HTMLINP_ID = re.compile(r"(?<=\sid)[\s]*\=[\s]*(\"|')(.*?)(?=(\"|'))", re.IGNORECASE)
     
@@ -275,7 +281,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
         self.REGEX_PORTSUB443 = re.compile(r":443")
         
         # Regex for valid parameter
-        self.REGEX_PARAM = re.compile(r"[0-9a-zA-Z_]")
+        self.REGEX_PARAM = re.compile(r"^[A-Za-z0-9_.~\-\[\]]+$")
         
         # Regex for param keys
         self.REGEX_PARAMKEYS = re.compile(r"(?<=\?|&)[^\=\&\n].*?(?=\=|&|\n)")
@@ -360,7 +366,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
             self.lblResponseParams.setToolTipText("These are identified by GAP, mainly with regular expressions.")
             self.cbParamJSONResponse.setToolTipText("If the response has a MIME type of JSON then the Key names will be retrieved.")
             self.cbParamXMLResponse.setToolTipText("If the response has a MIME type of XML then the XML attributes are retrieved.")
-            self.cbParamInputField.setToolTipText("If the response has a MIME type of HTML then the value of the NAME and ID attributes of any INPUT tags are retrieved.")
+            self.cbParamInputField.setToolTipText("If the response has a MIME type of HTML (or JAVASCRIPT because it may be building HTML) then the value of the NAME and ID attributes of any INPUT or TEXTAREA tags are retrieved.")
             self.cbParamJSVars.setToolTipText("Javascript variables set with 'var', 'let' or 'const' are retrieved.")
             self.cbParamFromLinks.setToolTipText("Any URL query string parameters in potential Links found will be retrieved, only if they are clearly in scope,\nor there is just a path and no way of determining if it is in scope.")
             self.cbReportSusParams.setToolTipText("If a 'sus' parameter is identified, a Burp custom Issue will be raised (unavailable in Burp Community Edition).\nThere will be no markers in the Request/Response of the Issue showing where the named parameter can be found because including this functionality\nseriously increases the time GAP can take to run, so this is not a feature at the moment.\nFor Burp Community Edition, the details of the parameter will be written to the extension output.")
@@ -826,7 +832,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
         self.txtDebugDetail.setVisible(False)
         self.txtDebugDetail.setLineWrap(True)
         self.txtDebugDetail.setEditable(False)
-        self.logContentType = False
+        self.logExtraInfo = False
         
         # Restore saved config settings
         self.restoreSavedConfig()
@@ -1267,7 +1273,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                 self.txtDebug.setVisible(True)
                 self.txtDebug.text = "DEBUG TEXT WILL BE DISPLAYED"
                 self.txtDebugDetail.setVisible(True)
-                self.logContentType = True
+                self.logExtraInfo = True
             else:
                 Desktop.getDesktop().browse(URI(URL_GITHUB))
         except:
@@ -3967,14 +3973,14 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                                 self._stderr.println("getResponseParams 5")
                                 self._stderr.println(e)
 
-                    # If the mime type is HTML then get <input> name and id values, and meta tag names
-                    elif mimeType == "HTML":
+                    # If the mime type is HTML (or JAVASCRIPT becuase it could be building HTML) then get <input> OR <textarea> name and id values, and meta tag names
+                    elif mimeType == "HTML" or mimeType == "JAVASCRIPT":
 
                         if self.cbParamInputField.isSelected():
                             # Get Input field name and id attributes
                             try:
                                 html_keys = self.REGEX_HTMLINP.findall(body)
-                                for key in html_keys:
+                                for tag, key in html_keys:
                                     self.checkIfCancel()
                                     input_name = self.REGEX_HTMLINP_NAME.search(key)
                                     if input_name is not None and input_name.group() != "":
@@ -4135,7 +4141,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                         include = False
                         break
                                 
-            if (_debug or self.logContentType) and include:
+            if (_debug or self.logExtraInfo) and include:
                 print("Content-Type included: "+contentType)
         
         except Exception as e:
@@ -4211,7 +4217,6 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                 # Replace different encodings of " before searching to maximise finds
                 search = search.replace('&#34;','"').replace('%22','"').replace('\x22','"').replace('\u0022','"')
                 try:
-                    #link_keys = self.REGEX_LINKS.finditer(search)
                     # Extract links using first regex
                     link_keys = [match.group(0) for match in self.REGEX_LINKS.finditer(search)]
                 except Exception as e:
@@ -4232,7 +4237,7 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                         # - suffix is 'js' and domain is NOT 'map'
                         # - domains with TLDs that arent in the COMMON_TLDS list
                         valid_extra_keys = [
-                            key for key in extra_keys 
+                            "//"+key for key in extra_keys 
                             if tldextract.extract(key).suffix 
                             and tldextract.extract(key).suffix.lower() not in ('call', 'skin', 'menu', 'style', 'rest', 'next', 'top') 
                             and len(tldextract.extract(key).domain) > 2 
@@ -4253,6 +4258,68 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                     self._stderr.println("getResponseParams 5")
                     self._stderr.println(e)
                 
+                # Get links from JS where they are built
+                try:
+                    raw_keys = self.REGEX_LINKS_JSBUILT.findall(search)
+
+                    jsbuilt_keys = []
+                    for key in raw_keys:
+                        key = key.strip()
+
+                        # Skip if it starts with a quote, contains < or >, or starts with $
+                        # or has a . somewhere before the :// if there is only one occurrence of ://
+                        if key.startswith(("'", '"', '`')):
+                            continue
+                        if '<' in key or '>' in key:
+                            continue
+                        if '/' not in key:
+                            continue
+                        if key.startswith('$'):
+                            continue
+                        if key.count("://") == 1:
+                            scheme_index = key.index("://")
+                            if '.' in key[:scheme_index]:
+                                continue
+
+                        # Prepend slash if needed
+                        if not key.startswith('/') and not key.startswith('http'):
+                            key = '/' + key
+                        
+                        # Cut off at the first quote, if it exists
+                        key = key.split('"')[0].split("'")[0].split('`')[0]
+                                
+                        if (_debug or self.logExtraInfo):
+                            print("JS Built Link: "+key)
+                        jsbuilt_keys.append(key)
+
+                    link_keys.extend(jsbuilt_keys)
+
+                except Exception as e:
+                    self._stderr.println("getResponseParams 5")
+                    self._stderr.println(e)
+            
+                # Get links from JS where fetch() is used
+                try:
+                    raw_keys = self.REGEX_LINKS_FETCH.findall(search)
+
+                    fetch_keys = []
+                    for key in raw_keys:
+                        key = key.strip()
+
+                        # Prepend slash if needed
+                        if not key.startswith('/') and not key.startswith('http'):
+                            key = '/' + key
+                                
+                        if (_debug or self.logExtraInfo):
+                            print("JS Fetch Link: "+key)
+                        fetch_keys.append(key)
+
+                    link_keys.extend(fetch_keys)
+
+                except Exception as e:
+                    self._stderr.println("getResponseParams 6")
+                    self._stderr.println(e)
+                    
                 # Remove duplicates
                 link_keys = list(set(link_keys))
                 
@@ -4950,8 +5017,9 @@ class BurpExtender(IBurpExtender, IContextMenuFactory, ITab):
                 # If the parameter has any backslashes, forward slashes, quot;, apos; or amp; in, then remove them
                 param = param.replace('\\', '').replace('/', '').replace('quot;','').replace('apos;','').replace('amp;','')
                 
-                # Add the param and origin to the list if the param does not contain at least 1 character that is a letter, number or _ 
-                if param != "" and self.REGEX_PARAM.search(param) is not None:
+                # Add the param and origin to the list if the param only contains the characters: A-Z a-z 0-9 - _ . ~ [ ]
+                matchedParam = self.REGEX_PARAM.match(param)
+                if param != "" and matchedParam and matchedParam.group(0) == param:
                     
                     # Check if it is a sus parameter and raise scan issue if it is enabled
                     self.checkSusParams(param, confidence, context)
