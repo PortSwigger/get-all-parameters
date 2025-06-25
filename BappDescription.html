@@ -1,17 +1,29 @@
-<p>This extension helps find potential endpoints, parameters, and generate a custom target wordlist.</p>
+<p>This extension collects all parameter names observed during scanning or manual testing and makes them accessible in a dedicated tab. It assists in identifying hidden, undocumented, or parameter pollution opportunities across the target application.</p>
 
-<p>Usage</p>
-
+<h2>Features</h2>
 <ul>
-	<li>Select a target in your Burp scope (or multiple targets), or even just one subfolder or endpoint, and use the context menu action to send the target to "GAP". Alternatively, right click a request or response in any other context and select GAP from the Extensions menu.</li>
-	<li>Go to the GAP tab to view the results.</li>
+  <li>Captures all parameters from HTTP requests and responses</li>
+  <li>Displays parameters in a dedicated "Get All Parameters" tab</li>
+  <li>Includes source information for each parameter (e.g. URL, body, cookie)</li>
+  <li>Highlights unique and duplicate parameter names</li>
+  <li>Supports exporting the parameter list for offline analysis</li>
 </ul>
 
-<p>Important notes:</p>
+<h2>Usage</h2>
+<p>To use the extension:</p>
+<ol>
+  <li>Browse or scan your target application as usual.</li>
+  <li>Right-click on a target in your Burp sitemap (or multiple targets), or even just one subfolder or endpoint, and use the extension-generated context menu item to "Send to GAP".</li>
+  <li>Open the "Get All Parameters" tab to view the aggregated list of observed parameters.</li>
+  <li>Use the interface to filter, sort, or search parameters of interest.</li>
+  <li>Optionally, export the list for external processing or further analysis.</li>
+</ol>
+
+<h2>Performance Tips</h2>
 <ul>
-	<li>If you don't need one of the modes, then un-check it as results will be quicker.</li>
-	<li>If you run GAP for one or more targets from the Site Map view, don't have them expanded when you run GAP... unfortunately this can make it a lot slower. It will be more efficient if you run for one or two target in the Site Map view at a time, as huge projects can have consume a lot of resources.</li>
-	<li>If you want to run GAP on one of more specific requests, do not select them from the Site Map tree view. It will be a lot quicker to run it from the Site Map Contents view if possible, or from proxy history.</li>
-	<li>It is hard to design GAP to display all controls for all screen resolutions and font sizes. I have tried to deal with the most common setups, but if you find you cannot see all the controls, you can hold down the "Ctrl" button and click the GAP logo header image to remove it to make more space.</li>
-	<li>The Words mode uses the "beautifulsoup4" library and this can be quite slow, so be patient!</li>
+  <li>Disable any scanning modes you don't need to speed up results.</li>
+  <li>When running GAP from the Site Map view, avoid expanding large targets beforehand as this significantly slows performance. For better efficiency, run GAP on one or two targets at a time.</li>
+  <li>To scan specific requests, use the Site Map Contents view or Proxy History instead of selecting items from the Site Map tree, as this is much faster.</li>
+  <li>If UI elements are not fully visible due to screen resolution or font size, hold down <code class="InlineCode">Ctrl</code> and click the GAP logo header image to hide it and reveal more space.</li>
+  <li>The "Words" mode relies on the <code class="InlineCode">beautifulsoup4</code> library, which may be slow. Please be patient while it runs.</li>
 </ul>
