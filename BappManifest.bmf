@@ -3,7 +3,7 @@ ExtensionType: 2
 Name: GAP (Get All Parameters, Links, and Words)
 RepoName: get-all-parameters
 ScreenVersion: 6.0.0
-SerialVersion: 19
+SerialVersion: 20
 MinPlatformVersion: 2
 ProOnly: False
 Author: XNL-h4ck3r
